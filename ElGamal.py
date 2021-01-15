@@ -371,9 +371,9 @@ if __name__ == "__main__":
         make_key()
         print("We made the public key and the secret key")
         exit()
-    if args.public is not None:
+    if args.public is not None and args.public is True:
         public_key_path = pathlib.Path(args.public)
-    if args.secret is not None:
+    if args.secret is not None and args.secret is True:
         secret_key_path = pathlib.Path(args.secret)
 
     if not public_key_path.exists() or not secret_key_path.exists():
@@ -407,3 +407,5 @@ if __name__ == "__main__":
         decrypted_message = ElGamal_decrypt(decrypting_message_path,
                                             public_key_path, secret_key_path)
         write_decrypted_message(decrypted_message)
+
+    parser.print_help()
