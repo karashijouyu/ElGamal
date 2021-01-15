@@ -3,7 +3,7 @@
 import argparse
 import secrets
 import pathlib
-
+import mimetypes
 
 def extended_euclidean_algorithm(a, b):
     """
@@ -40,7 +40,30 @@ def extended_euclidean_algorithm(a, b):
         x2 = x3
         y2 = y3
 
-    return x1
+    return r1, x1, y1
+
+
+def find_inverse(a, p):
+
+    """
+        Returns inverse which is the element of the finite field.
+
+        Args:
+            a: integers for the equation ax + by = GCD(a, b)
+            b: integers. prime number. the order of the finite field.
+        Returns:
+            inverse: integer x. Inverse of a such that ax = 1 (mod p)
+            and inverse is the element of the finite field
+    """
+
+    remainder, inverse, y = extended_euclidean_algorithm(a, p)
+
+    while 1:
+        if inverse > 0:
+            inverse = inverse % p
+            return inverse
+        else:
+            inverse += p
 
 
 def is_prime(n):
@@ -117,12 +140,16 @@ def make_secret_key():
 
     secret_key = secrets.randbits(key_bits)
 
+    return secret_key
+
+
+def write_secret_key(secret_key):
     with open('secret.key', 'w') as f:
         f.write("secret_key\n")
         f.write(str(secret_key))
 
 
-def make_public_key(prime):
+def make_public_key(secret_key):
     """
         make public key and makes a file containing strings of
         these public keys
@@ -130,22 +157,18 @@ def make_public_key(prime):
         Args:
             prime: integer. prime number
             secret_key: integer. secret key
-    """
-    while 1:
-        try:
-            with open('secret.key', 'r') as f:
-                f.readline()
-                secret_key = int(f.readline())
-            break
-        except FileNotFoundError:
-            print("There's no secret key.making secret key...")
-            make_secret_key()
-
+     """
+    prime = find_enough_big_prime_number()
     b = 0
     while b == 0:
-        # b is preferably generating element,but not necessary.
+        # b is preferably primitive element,but not necessary.
         b = secrets.randbelow(prime)
     y = pow(b, secret_key, prime)
+
+    return y, b, prime
+
+
+def write_public_key(y, b, prime):
     with open('public.key', 'w') as f:
         f.write("y:\n")
         f.write(str(y))
@@ -158,11 +181,14 @@ def make_public_key(prime):
 
 
 def make_key():
-    prime = find_enough_big_prime_number()
-    make_public_key(prime)
+    secret_key = make_secret_key()
+    write_secret_key(secret_key)
+    y, b, prime = make_public_key(secret_key)
+    write_public_key(y, b, prime)
 
 
 def read_public_key(public_key_path):
+
     with public_key_path.open() as f:
         f.readline()
         y = int(f.readline())
@@ -181,7 +207,42 @@ def read_secret_key(secret_key_path):
     return secret_key
 
 
-def ElGamal_encrypt(message_path, public_key_path):
+def get_message(message):
+
+    """
+        get message from file or string format and return it.
+
+        Args:
+            message: str or Path.file path to the cleartext or cleartext itself.
+
+        Returns:
+            message: str.cleartext
+    """
+    if not isinstance(message, str) and not isinstance(message, pathlib.Path):
+        print("input str object or Path object.aborting...")
+        exit()
+    if isinstance(message, str):
+        if message == "":
+            print("message is empty.aborting...")
+            exit()
+        else:
+            return message
+    else:
+        try:
+            with message.open() as f:
+                message = f.read()
+
+            if message == "":
+                print("message is empty.aborting...")
+                exit()
+
+            return message
+        except UnicodeDecodeError:
+            print("file is binary.aborting...")
+            exit()
+
+
+def ElGamal_encrypt(message, public_key_path, secret_key_path):
     """
         Encrypt a text with ElGamal cryptsystem.
 
@@ -192,33 +253,46 @@ def ElGamal_encrypt(message_path, public_key_path):
                              where the public key is stored.
 
         Returns:
-            (c1, c2):Tuple, Encrypted message
+            encrypted_message:Tuple (c1, c2), Encrypted message
     """
     y = 0
     b = 0
     prime = 0
+
+    secret_key = 0
+
+    while secret_key == 0:
+        try:
+            secret_key = read_secret_key(secret_key_path)
+        except (FileNotFoundError, IsADirectoryError):
+            print("secret key file not found. now generating...")
+            secret_key = make_secret_key()
+            write_secret_key(secret_key)
+
     while y == 0 and b == 0 and prime == 0:
         try:
-            with public_key_path.open() as f:
-                f.readline()
-                y = int(f.readline())
-                f.readline()
-                b = int(f.readline())
-                f.readline()
-                prime = int(f.readline())
-        except FileNotFoundError:
-            print("Keys not found."
-                  "Please make public key and secret key first.")
-            exit()
-    with message_path.open() as f:
-        message = f.read()
+            y, b, prime = read_public_key(public_key_path)
+        except (FileNotFoundError, IsADirectoryError):
+            print("public key file not found. now generating...")
+            y, b, prime = make_public_key(secret_key)
+            write_public_key(y, b, prime)
 
+    message = get_message(message)
     message_integer = [ord(c) for c in message]
 
     random = secrets.randbelow(prime)
     c1 = pow(b, random, prime)
     c2_letters = [(pow(y, random, prime) * letter) % prime
                   for letter in message_integer]
+
+    encrypted_message = (c1, c2_letters)
+
+    return encrypted_message
+
+
+def write_encrypted_message(encrypted_message):
+    c1 = encrypted_message[0]
+    c2_letters = encrypted_message[1]
 
     with open('encrypted_message', 'w') as f:
         f.write("c1:\n")
@@ -229,7 +303,7 @@ def ElGamal_encrypt(message_path, public_key_path):
             f.write(str(c2))
             f.write("\n")
 
- 
+
 def ElGamal_decrypt(encrypted_message, public_key_path, secret_key_path):
     """
         Decrypt a text with ElGamal cryptsystem.
@@ -237,44 +311,57 @@ def ElGamal_decrypt(encrypted_message, public_key_path, secret_key_path):
         Args:
              encrypted_message:Tuple of integers. encrypted message
              public_key_path: Path object of public key.
-             secret_key:integer. Path object of secret key.
+             secret_key_path:integer. Path object of secret key.
         Returns:
-            message:integer.Decrypted message.
+             decrypted_message:string.Decrypted message.
     """
-    y, b, prime = read_public_key(public_key_path)
-    secret_key = read_secret_key(secret_key_path)
+    try:
+        y, b, prime = read_public_key(public_key_path)
+    except (FileNotFoundError, IsADirectoryError):
+        print("public key not found.aborting...")
+        exit()
+
+    try:
+        secret_key = read_secret_key(secret_key_path)
+    except (FileNotFoundError, IsADirectoryError):
+        print("secret key not found,aborting...")
+        exit()
 
     c2_list = []
-    with encrypted_message.open() as f:
-        f.readline()
-        c1 = int(f.readline())
-        f.readline()
-        c2 = int(f.readline())
-        while c2 != '':
-            c2_int = int(c2)
-            c2_list.append(c2_int)
-            c2 = f.readline()
-    # Let p:prime. GCD(a,p) = 1 where 0 < a < p.
-    # ax + bp = 1 (mod p) -> ax = 1 (mod p) so x is a's inverse in (mod p).
-    c1_power_secret_key_inverse = \
-        extended_euclidean_algorithm(pow(c1, secret_key, prime), prime)
-
-    message_sequence = []
+    c1 = encrypted_message[0]
+    for i in range(len(encrypted_message[1])):
+        c2_list.append(encrypted_message[1][i])
+    c1_x_power = pow(c1, secret_key, prime)
+    c1_inverse = find_inverse(c1_x_power, prime)
+    
+    decrypted_message = ""
     for c2 in c2_list:
-        letter = chr((c2 * c1_power_secret_key_inverse) % prime)
-        message_sequence.append(letter)
+        decrypted_number = (c1_inverse * c2) % prime
+        letter = chr(decrypted_number)
+        decrypted_message += letter
+
+    return decrypted_message
+
+
+def write_decrypted_message(decrypted_message):
     with open('decrypted_message', 'w') as f:
-        for letter in message_sequence:
+        for letter in decrypted_message:
             f.write(letter)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--encrypt", type=str)
-    parser.add_argument("-d", "--decrypt", type=str)
-    parser.add_argument("-p", "--public", type=str)
-    parser.add_argument("-s", "--secret", type=str)
-    parser.add_argument("-m", "--make_keys", action="store_true")
+    parser.add_argument("-e", "--encrypt", metavar="message",
+                        help="encrypt a message")
+    parser.add_argument("-d", "--decrypt", metavar="encrypted_message",
+                        help="decrypt a encrypted_message")
+    parser.add_argument("-p", "--public", help="specify public key file path",
+                        action="store_true")
+    parser.add_argument("-s", "--secret", help="specify secret key file path",
+                        action="store_true")
+    parser.add_argument("-m", "--make_keys",
+                        help="make public keys and secret key files",
+                        action="store_true")
     args = parser.parse_args()
 
     public_key_path = pathlib.Path()
@@ -312,8 +399,11 @@ if __name__ == "__main__":
 
     if args.encrypt is not None:
         encrypting_message_path = pathlib.Path(args.encrypt)
-        ElGamal_encrypt(encrypting_message_path, public_key_path)
+        encrypted_message = ElGamal_encrypt(encrypting_message_path,
+                                            public_key_path)
+        write_encrypted_message(encrypted_message)
     if args.decrypt is not None:
         decrypting_message_path = pathlib.Path(args.decrypt)
-        ElGamal_decrypt(decrypting_message_path, public_key_path,
-                        secret_key_path)
+        decrypted_message = ElGamal_decrypt(decrypting_message_path,
+                                            public_key_path, secret_key_path)
+        write_decrypted_message(decrypted_message)
